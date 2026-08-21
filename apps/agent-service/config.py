@@ -3,7 +3,7 @@ Configuration settings for Governed AI Database Copilot Agent Service.
 """
 
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 
@@ -29,9 +29,7 @@ class Settings(BaseSettings):
     max_rows_default: int = Field(default=100, alias="DEFAULT_MAX_ROWS_PER_QUERY")
     confirmation_token_expiry_seconds: int = Field(default=300, alias="CONFIRMATION_TOKEN_EXPIRY_SECONDS")
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 settings = Settings()
