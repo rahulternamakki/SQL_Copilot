@@ -27,10 +27,17 @@ class QdrantStore:
         if self._client is not None:
             return self._client
         try:
-            self._client = QdrantClient(host=self.host, port=self.port, timeout=3.0)
+            if getattr(settings, "qdrant_url", None):
+                self._client = QdrantClient(
+                    url=settings.qdrant_url,
+                    api_key=settings.qdrant_api_key,
+                    timeout=5.0,
+                )
+            else:
+                self._client = QdrantClient(host=self.host, port=self.port, timeout=3.0)
             return self._client
         except Exception as e:
-            logger.warning(f"Could not connect to Qdrant at {self.host}:{self.port}: {e}. Using fallback memory store.")
+            logger.warning(f"Could not connect to Qdrant: {e}. Using fallback memory store.")
             return None
 
     def get_collection_name(self, connection_id: str) -> str:

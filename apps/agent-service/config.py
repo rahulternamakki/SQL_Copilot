@@ -3,6 +3,7 @@ Configuration settings for Governed AI Database Copilot Agent Service.
 """
 
 import os
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
@@ -13,9 +14,11 @@ class Settings(BaseSettings):
     groq_model: str = Field(default="llama-3.3-70b-versatile", alias="GROQ_MODEL")
     groq_temperature: float = Field(default=0.0, alias="GROQ_TEMPERATURE")
 
-    # Qdrant Vector DB Settings
+    # Qdrant Vector DB Settings (Local Host/Port or Cloud URL/API Key)
     qdrant_host: str = Field(default="localhost", alias="QDRANT_HOST")
     qdrant_port: int = Field(default=6333, alias="QDRANT_PORT")
+    qdrant_url: Optional[str] = Field(default=None, alias="QDRANT_URL")
+    qdrant_api_key: Optional[str] = Field(default=None, alias="QDRANT_API_KEY")
     qdrant_collection_prefix: str = Field(default="db_copilot_", alias="QDRANT_COLLECTION_PREFIX")
 
     # MCP Server Connection
