@@ -39,10 +39,10 @@ class SQLGeneratorAgent:
                     "STRICT RULES:\n"
                     "1. Only use table and column names present in the provided schema context. NEVER hallucinate table or column names.\n"
                     "2. Follow any SQL Filter / Business Rules mentioned in the glossary chunks.\n"
-                    "3. For write requests (UPDATE/DELETE/INSERT), only touch the necessary rows and always include WHERE clauses.\n"
+                    "3. For write requests (UPDATE/DELETE/INSERT/DROP/TRUNCATE), only touch the necessary rows and always include WHERE clauses for updates/deletes.\n"
                     "4. If error context from a previous attempt is provided, analyze the error and fix it completely.\n"
                     "5. Output must be a strict JSON object matching schema:\n"
-                    "{\"sql\": \"...;\", \"tables_touched\": [\"table1\"], \"operation_type\": \"SELECT\"|\"UPDATE\"|\"DELETE\"|\"INSERT\", \"reasoning\": \"...\"}"
+                    "{\"sql\": \"...;\", \"tables_touched\": [\"table1\"], \"operation_type\": \"SELECT\"|\"UPDATE\"|\"DELETE\"|\"INSERT\"|\"DROP\"|\"TRUNCATE\", \"reasoning\": \"...\"}"
                 )
 
                 prompt_content = f"User Question: {user_query}\n\nGrounded Schema & Glossary Context:\n{context_str}"
@@ -79,6 +79,20 @@ class SQLGeneratorAgent:
                 tables_touched=["customers"],
                 operation_type="DELETE",
                 reasoning="Deletes inactive customer accounts registered prior to 2022.",
+            )
+        elif "truncate" in q_lower:
+            return SQLGeneratorOutput(
+                sql="TRUNCATE TABLE customer_audit_staging;",
+                tables_touched=["customer_audit_staging"],
+                operation_type="TRUNCATE",
+                reasoning="Truncates staging table records.",
+            )
+        elif "drop" in q_lower:
+            return SQLGeneratorOutput(
+                sql="DROP TABLE obsolete_discounts_2020;",
+                tables_touched=["obsolete_discounts_2020"],
+                operation_type="DROP",
+                reasoning="Drops obsolete table.",
             )
         elif "update" in q_lower or "inflation" in q_lower:
             return SQLGeneratorOutput(

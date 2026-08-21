@@ -22,21 +22,28 @@ import {
   RotateCcw,
   Undo2,
   Check,
+  Coins,
+  Cpu,
+  Activity,
 } from "lucide-react";
 import { api, ChatResponse, WriteConfirmResult } from "@/lib/api";
 import ConfirmationCard from "./ConfirmationCard";
 
 interface ChatPlaygroundProps {
   connectionId: string;
+  initialPrompt?: string;
 }
 
-export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
-  const [query, setQuery] = useState("Which customers haven't placed an order in the last 90 days?");
+export default function ChatPlayground({ connectionId, initialPrompt }: ChatPlaygroundProps) {
+  const [query, setQuery] = useState(
+    initialPrompt || "Which customers haven't placed an order in the last 90 days?"
+  );
   const [loading, setLoading] = useState(false);
   const [clarifying, setClarifying] = useState(false);
   const [response, setResponse] = useState<ChatResponse | null>(null);
   const [copiedSQL, setCopiedSQL] = useState(false);
   const [showTraceDetails, setShowTraceDetails] = useState(true);
+  const [showSpanDrawer, setShowSpanDrawer] = useState(false);
 
   // Write Confirmation & Rollback State (Phase 3)
   const [writeResult, setWriteResult] = useState<WriteConfirmResult | null>(null);
@@ -268,7 +275,7 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
                 <span>•</span>
                 <span>Safety inspection & dry run</span>
                 <span>•</span>
-                <span>Synthesizing SQL</span>
+                <span>Synthesizing SQL with Groq LLaMA 3.3 70B</span>
               </div>
             </div>
           </div>
@@ -395,6 +402,53 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
               AI
             </div>
             <div className="flex-1 space-y-4">
+              {/* Phase 4 Live Observability Telemetry Floating Bar */}
+              {response.telemetry && (
+                <div className="px-3.5 py-2 rounded-xl bg-[#0b1120] border border-slate-800 text-xs flex items-center justify-between text-slate-400 shadow-sm flex-wrap gap-2">
+                  <div className="flex items-center gap-3 font-mono text-[11px]">
+                    <span className="flex items-center gap-1 text-slate-300">
+                      <Clock className="h-3 w-3 text-emerald-400" />
+                      <strong>{response.telemetry.total_latency_ms} ms</strong>
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1 text-slate-300">
+                      <Cpu className="h-3 w-3 text-cyan-400" />
+                      <strong>{response.telemetry.total_tokens} tokens</strong>
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1 text-slate-300">
+                      <Coins className="h-3 w-3 text-amber-400" />
+                      <strong>${response.telemetry.estimated_cost_usd}</strong>
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => setShowSpanDrawer(!showSpanDrawer)}
+                    className="text-[11px] font-sans text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition"
+                  >
+                    <Activity className="h-3 w-3" />
+                    <span>{showSpanDrawer ? "Hide Spans" : "View Node Spans"}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Phase 4 Agent Execution Node Spans Breakdown */}
+              {showSpanDrawer && response.telemetry && (
+                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-2 animate-in fade-in">
+                  <span className="font-semibold text-slate-300 text-[11px] uppercase tracking-wider block">
+                    Agent Node Execution Spans (OpenTelemetry / LangSmith Trace)
+                  </span>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {response.telemetry.spans.map((s, idx) => (
+                      <div key={idx} className="p-2 rounded-lg bg-slate-900 border border-slate-800 font-mono text-[11px] flex justify-between items-center">
+                        <span className="text-slate-400 truncate">{s.node_name}</span>
+                        <span className="text-emerald-400 font-bold ml-2">{s.duration_ms} ms</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Agent Trace */}
               <div className="p-4 rounded-2xl bg-[#0c1220] border border-slate-800 space-y-3 text-xs shadow-md">
                 <div className="flex items-center justify-between">

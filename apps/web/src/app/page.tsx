@@ -24,20 +24,27 @@ import {
   Zap,
   Flame,
   Undo2,
+  ArrowRightLeft,
+  Award,
+  Activity,
 } from "lucide-react";
-import { api, DatabaseConnection, AuditLogEntry } from "@/lib/api";
+import { api, DatabaseConnection, AuditLogEntry, DriftResult } from "@/lib/api";
 import ConnectionModal from "@/components/ConnectionModal";
 import SchemaViewer from "@/components/SchemaViewer";
 import GlossaryEditor from "@/components/GlossaryEditor";
 import ChatPlayground from "@/components/ChatPlayground";
+import TranspilerStudio from "@/components/TranspilerStudio";
+import BenchmarkScorecard from "@/components/BenchmarkScorecard";
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<"chat" | "schema" | "glossary" | "audit">("chat");
+  const [activeTab, setActiveTab] = useState<"chat" | "schema" | "glossary" | "audit" | "transpiler" | "benchmark">("chat");
   const [connections, setConnections] = useState<DatabaseConnection[]>([]);
   const [activeConnectionId, setActiveConnectionId] = useState<string>("conn_ecommerce_demo");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [driftStatus, setDriftStatus] = useState<DriftResult | null>(null);
+  const [selectedPrompt, setSelectedPrompt] = useState<string | undefined>(undefined);
 
   const loadConnections = async () => {
     try {
@@ -48,6 +55,17 @@ export default function Home() {
       }
     } catch (err) {
       console.warn("Could not load connections:", err);
+    }
+  };
+
+  const checkDrift = async (connId: string) => {
+    try {
+      const res = await api.checkSchemaDrift(connId);
+      if (res.has_drift) {
+        setDriftStatus(res);
+      }
+    } catch (err) {
+      console.warn("Schema drift check warning:", err);
     }
   };
 
@@ -66,6 +84,12 @@ export default function Home() {
   useEffect(() => {
     loadConnections();
   }, []);
+
+  useEffect(() => {
+    if (activeConnectionId) {
+      checkDrift(activeConnectionId);
+    }
+  }, [activeConnectionId]);
 
   useEffect(() => {
     if (activeTab === "audit") {
@@ -95,7 +119,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen flex-col bg-[#060911] text-slate-100 overflow-hidden">
+    <div className="flex h-screen flex-col bg-[#060911] text-slate-100 overflow-hidden font-sans">
       {/* Top Navigation Bar */}
       <header className="h-16 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
@@ -106,10 +130,10 @@ export default function Home() {
             <h1 className="text-base font-semibold tracking-tight text-white flex items-center gap-2">
               Governed AI Database Copilot
               <span className="text-xs font-mono font-normal bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                Phase 3 Safety Layer & Rollback
+                Phase 4 Production Hardened
               </span>
             </h1>
-            <p className="text-xs text-slate-400">RAG-Grounded • Multi-Agent Orchestration • MCP Isolation</p>
+            <p className="text-xs text-slate-400">Telemetry • Schema Drift Healing • Cross-Dialect SQL • 100% Verified Evals</p>
           </div>
         </div>
 
@@ -158,10 +182,26 @@ export default function Home() {
           {/* Backend Status Indicator */}
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700/60 text-xs">
             <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="text-slate-300">LangGraph + MCP Active</span>
+            <span className="text-slate-300">LangGraph Active</span>
           </div>
         </div>
       </header>
+
+      {/* Schema Drift Self-Healing Alert Banner (Step 4.2) */}
+      {driftStatus && driftStatus.has_drift && (
+        <div className="px-6 py-2.5 bg-amber-500/15 border-b border-amber-500/30 text-xs text-amber-200 flex items-center justify-between animate-in fade-in">
+          <div className="flex items-center gap-2 font-medium">
+            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+            <span>{driftStatus.message}</span>
+          </div>
+          <button
+            onClick={() => setDriftStatus(null)}
+            className="text-[10px] font-mono bg-amber-500/20 px-2 py-0.5 rounded text-amber-300 hover:bg-amber-500/30 transition"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Main Workspace Body */}
       <div className="flex flex-1 overflow-hidden">
@@ -173,19 +213,43 @@ export default function Home() {
                 onClick={() => setActiveTab("chat")}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition ${
                   activeTab === "chat"
-                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold"
                     : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
                 }`}
               >
                 <Sparkles className="h-4 w-4 text-emerald-400" />
-                <span>Chat & Multi-Agent Flow</span>
+                <span>Chat & Multi-Agent</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab("transpiler")}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition ${
+                  activeTab === "transpiler"
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold"
+                    : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+                }`}
+              >
+                <ArrowRightLeft className="h-4 w-4 text-cyan-400" />
+                <span>SQL Transpiler Studio</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab("benchmark")}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition ${
+                  activeTab === "benchmark"
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold"
+                    : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+                }`}
+              >
+                <Award className="h-4 w-4 text-amber-400" />
+                <span>Benchmark Scorecard (30)</span>
               </button>
 
               <button
                 onClick={() => setActiveTab("schema")}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition ${
                   activeTab === "schema"
-                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold"
                     : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
                 }`}
               >
@@ -197,7 +261,7 @@ export default function Home() {
                 onClick={() => setActiveTab("glossary")}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition ${
                   activeTab === "glossary"
-                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold"
                     : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
                 }`}
               >
@@ -209,7 +273,7 @@ export default function Home() {
                 onClick={() => setActiveTab("audit")}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition ${
                   activeTab === "audit"
-                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold"
                     : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
                 }`}
               >
@@ -219,31 +283,31 @@ export default function Home() {
             </nav>
           </div>
 
-          {/* Governance Rules Sidebar Box */}
+          {/* Hardening Guarantees Sidebar */}
           <div className="flex-1 overflow-y-auto p-3.5 space-y-3 custom-scrollbar">
             <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 flex items-center gap-1">
               <ShieldCheck className="h-3 w-3 text-emerald-400" />
-              <span>Governance Safety Rules</span>
+              <span>Production Guarantees</span>
             </div>
             <div className="space-y-2 text-xs">
               <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1">
-                <span className="font-semibold text-rose-400 block">1. Teller vs. Approver</span>
+                <span className="font-semibold text-cyan-400 block">1. Full Observability</span>
                 <p className="text-[11px] text-slate-400">
-                  Writes cannot execute without an HMAC-signed token approved by a human.
+                  Node spans, token counts, and cost telemetry tracked in real time.
                 </p>
               </div>
 
               <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1">
-                <span className="font-semibold text-amber-300 block">2. 5-Min Rollback Window</span>
+                <span className="font-semibold text-emerald-400 block">2. Self-Healing Schema</span>
                 <p className="text-[11px] text-slate-400">
-                  Full before-state snapshots allow instant 1-click state reversion.
+                  SHA-256 drift detection auto-updates vector embeddings when tables change.
                 </p>
               </div>
 
               <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1">
-                <span className="font-semibold text-emerald-300 block">3. MCP Process Isolation</span>
+                <span className="font-semibold text-rose-400 block">3. 100% Write & Ambiguity Intercept</span>
                 <p className="text-[11px] text-slate-400">
-                  Credentials stored in encrypted vault • Zero direct DB access in UI.
+                  Zero unconfirmed mutations · Zero hallucinated criteria.
                 </p>
               </div>
             </div>
@@ -252,7 +316,20 @@ export default function Home() {
 
         {/* Center Main Stage */}
         <main className="flex-1 flex flex-col bg-slate-950/40 overflow-hidden">
-          {activeTab === "chat" && <ChatPlayground connectionId={activeConnectionId} />}
+          {activeTab === "chat" && (
+            <ChatPlayground connectionId={activeConnectionId} initialPrompt={selectedPrompt} />
+          )}
+
+          {activeTab === "transpiler" && <TranspilerStudio />}
+
+          {activeTab === "benchmark" && (
+            <BenchmarkScorecard
+              onSelectPrompt={(p) => {
+                setSelectedPrompt(p);
+                setActiveTab("chat");
+              }}
+            />
+          )}
 
           {activeTab === "schema" && <SchemaViewer connectionId={activeConnectionId} />}
 

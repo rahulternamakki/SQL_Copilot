@@ -34,7 +34,7 @@ class SchemaChunk(BaseModel):
 class SQLGeneratorOutput(BaseModel):
     sql: str = Field(description="The complete, syntactically valid SQL statement.")
     tables_touched: List[str] = Field(description="List of all tables referenced in the query.")
-    operation_type: Literal["SELECT", "UPDATE", "DELETE", "INSERT", "OTHER"] = Field(
+    operation_type: Literal["SELECT", "UPDATE", "DELETE", "INSERT", "TRUNCATE", "DROP", "ALTER", "OTHER"] = Field(
         description="Type of SQL operation."
     )
     reasoning: str = Field(description="Brief explanation of how the SQL addresses the user question.")
