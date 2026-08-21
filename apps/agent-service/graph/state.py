@@ -18,9 +18,24 @@ class PlannerOutput(BaseModel):
         description="Classification of query intent: read-only analytical query, write modification, or ambiguous concept requiring clarification."
     )
     steps: List[PlanStep] = Field(default_factory=list, description="Ordered decomposition of the query steps.")
+    plan_steps: List[PlanStep] = Field(default_factory=list, description="Alias for steps.")
+    reasoning: Optional[str] = Field(default=None, description="Explanation for classification.")
     ambiguity_reason: Optional[str] = Field(
         default=None, description="Explanation if intent is classified as ambiguous."
     )
+    clarification_question: Optional[str] = Field(
+        default=None, description="Optional clarification prompt if ambiguous."
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.steps and self.plan_steps:
+            self.steps = self.plan_steps
+        elif not self.plan_steps and self.steps:
+            self.plan_steps = self.steps
+        if not self.ambiguity_reason and self.reasoning and self.intent == "ambiguous":
+            self.ambiguity_reason = self.reasoning
+        elif not self.reasoning and self.ambiguity_reason:
+            self.reasoning = self.ambiguity_reason
 
 
 class SchemaChunk(BaseModel):

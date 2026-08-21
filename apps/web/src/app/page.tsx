@@ -27,6 +27,7 @@ import {
   ArrowRightLeft,
   Award,
   Activity,
+  Play,
 } from "lucide-react";
 import { api, DatabaseConnection, AuditLogEntry, DriftResult } from "@/lib/api";
 import ConnectionModal from "@/components/ConnectionModal";
@@ -35,12 +36,16 @@ import GlossaryEditor from "@/components/GlossaryEditor";
 import ChatPlayground from "@/components/ChatPlayground";
 import TranspilerStudio from "@/components/TranspilerStudio";
 import BenchmarkScorecard from "@/components/BenchmarkScorecard";
+import DemoTourModal from "@/components/DemoTourModal";
+import ArchitectureModal from "@/components/ArchitectureModal";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<"chat" | "schema" | "glossary" | "audit" | "transpiler" | "benchmark">("chat");
   const [connections, setConnections] = useState<DatabaseConnection[]>([]);
   const [activeConnectionId, setActiveConnectionId] = useState<string>("conn_ecommerce_demo");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
+  const [isArchModalOpen, setIsArchModalOpen] = useState(false);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [driftStatus, setDriftStatus] = useState<DriftResult | null>(null);
@@ -106,6 +111,11 @@ export default function Home() {
     }
   };
 
+  const handleLaunchDemoScenario = (prompt: string, targetTab: "chat" | "transpiler" | "benchmark" = "chat") => {
+    setSelectedPrompt(prompt);
+    setActiveTab(targetTab);
+  };
+
   const activeConn = connections.find((c) => c.connection_id === activeConnectionId) || {
     connection_id: "conn_ecommerce_demo",
     display_name: "E-Commerce Demo DB",
@@ -130,15 +140,33 @@ export default function Home() {
             <h1 className="text-base font-semibold tracking-tight text-white flex items-center gap-2">
               Governed AI Database Copilot
               <span className="text-xs font-mono font-normal bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                Phase 4 Production Hardened
+                Phase 5 Production Ready
               </span>
             </h1>
             <p className="text-xs text-slate-400">Telemetry • Schema Drift Healing • Cross-Dialect SQL • 100% Verified Evals</p>
           </div>
         </div>
 
-        {/* Status Indicators & Connection Selector */}
+        {/* Status Indicators & Action Buttons */}
         <div className="flex items-center gap-3">
+          {/* Guided Demo Tour Button */}
+          <button
+            onClick={() => setIsDemoModalOpen(true)}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-950/60 transition"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Guided Demo Tour</span>
+          </button>
+
+          {/* Architecture Visualizer Button */}
+          <button
+            onClick={() => setIsArchModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 border border-slate-700 transition"
+          >
+            <Layers className="h-3.5 w-3.5 text-cyan-400" />
+            <span>Architecture</span>
+          </button>
+
           {/* Connection Dropdown */}
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700/80 text-xs shadow-sm">
             <Database className="h-4 w-4 text-emerald-400 shrink-0" />
@@ -178,12 +206,6 @@ export default function Home() {
             <Plus className="h-3.5 w-3.5 text-emerald-400" />
             <span>Connect DB</span>
           </button>
-
-          {/* Backend Status Indicator */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700/60 text-xs">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="text-slate-300">LangGraph Active</span>
-          </div>
         </div>
       </header>
 
@@ -447,6 +469,19 @@ export default function Home() {
           loadConnections();
           setActiveConnectionId(id);
         }}
+      />
+
+      {/* Guided Demo Tour Modal */}
+      <DemoTourModal
+        isOpen={isDemoModalOpen}
+        onClose={() => setIsDemoModalOpen(false)}
+        onSelectPrompt={handleLaunchDemoScenario}
+      />
+
+      {/* Architecture Visualizer Modal */}
+      <ArchitectureModal
+        isOpen={isArchModalOpen}
+        onClose={() => setIsArchModalOpen(false)}
       />
     </div>
   );
