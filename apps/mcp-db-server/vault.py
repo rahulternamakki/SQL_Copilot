@@ -227,13 +227,17 @@ class CredentialVault:
             return cursor.rowcount > 0
 
     def build_connection_url(self, creds: DatabaseCredentials) -> str:
-        """Build SQLAlchemy connection string from DatabaseCredentials."""
+        """Build SQLAlchemy connection string from DatabaseCredentials with URL-encoded credentials."""
+        import urllib.parse
+        safe_user = urllib.parse.quote_plus(creds.username) if creds.username else ""
+        safe_pass = urllib.parse.quote_plus(creds.password) if creds.password else ""
+        auth_part = f"{safe_user}:{safe_pass}@" if safe_user or safe_pass else ""
+
         if creds.db_type == "postgresql":
-            user = creds.username
-            password = creds.password
-            return f"postgresql+psycopg2://{user}:{password}@{creds.host}:{creds.port}/{creds.database}?sslmode={creds.ssl_mode}"
+            ssl_arg = f"?sslmode={creds.ssl_mode}" if creds.ssl_mode else ""
+            return f"postgresql+psycopg2://{auth_part}{creds.host}:{creds.port}/{creds.database}{ssl_arg}"
         elif creds.db_type == "mysql":
-            return f"mysql+pymysql://{creds.username}:{creds.password}@{creds.host}:{creds.port}/{creds.database}"
+            return f"mysql+pymysql://{auth_part}{creds.host}:{creds.port}/{creds.database}"
         elif creds.db_type == "sqlite":
             return f"sqlite:///{creds.database}"
         else:
