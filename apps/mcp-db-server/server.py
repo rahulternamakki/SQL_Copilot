@@ -132,6 +132,7 @@ def health_check():
 
 
 @app.post("/connections/test")
+@app.post("/tools/test_connection")
 def test_connection(payload: ConnectionPayload):
     """Test connection reachability directly without saving."""
     creds = DatabaseCredentials(**payload.model_dump())

@@ -37,14 +37,22 @@ class ConnectionService:
                     f"{self.mcp_url}/tools/test_connection",
                     json=payload.model_dump(),
                 )
+                if res.status_code == 404:
+                    res = await client.post(
+                        f"{self.mcp_url}/connections/test",
+                        json=payload.model_dump(),
+                    )
                 if res.status_code == 200:
-                    return {"success": True, "message": "Connection successful!"}
+                    data = res.json()
+                    if isinstance(data, dict) and data.get("success") is False:
+                        return data
+                    return {"success": True, "message": data.get("message", "Connection successful!")}
                 else:
                     detail = res.json().get("detail", res.text)
                     return {"success": False, "message": detail}
             except Exception as e:
                 logger.error(f"Failed to test connection: {e}")
-                return {"success": False, "message": str(e)}
+                return {"success": False, "message": f"Connection failed: {str(e)}"}
 
     async def save_connection(self, payload: DatabaseConnectionPayload) -> Dict[str, Any]:
         """Save encrypted connection in vault via MCP DB Server."""
