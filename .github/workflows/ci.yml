@@ -18,14 +18,19 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Agent Service & MCP Dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r apps/agent-service/requirements.txt
           pip install -r apps/mcp-db-server/requirements.txt
           pip install -r evals/requirements.txt
+          pip install pytest pytest-asyncio
 
-      - name: Run Evaluation Harness Smoke Test
+      - name: Run Pytest Test Suite
+        run: |
+          python -m pytest
+
+      - name: Run Evaluation Benchmark Harness
         run: |
           python evals/eval_runner.py
 

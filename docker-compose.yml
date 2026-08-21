@@ -1,0 +1,55 @@
+services:
+  # ==============================================================================
+  # Sample PostgreSQL Database seeded with E-commerce dataset
+  # ==============================================================================
+  postgres-sample:
+    image: postgres:16-alpine
+    container_name: copilot_postgres_sample
+    environment:
+      POSTGRES_USER: ${SAMPLE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${SAMPLE_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${SAMPLE_DB_NAME:-ecommerce_demo}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./infra/init-db:/docker-entrypoint-initdb.d:ro
+      - postgres_sample_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce_demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - copilot_net
+
+  # ==============================================================================
+  # Qdrant Vector Database for RAG (Schema & Business Glossary retrieval)
+  # ==============================================================================
+  qdrant:
+    image: qdrant/qdrant:v1.9.4
+    container_name: copilot_qdrant
+    ports:
+      - "6333:6333" # REST API
+      - "6334:6334" # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__HTTP_PORT: 6333
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333 && echo -e \"GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && cat <&3 | grep 200'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - copilot_net
+
+volumes:
+  postgres_sample_data:
+    driver: local
+  qdrant_data:
+    driver: local
+
+networks:
+  copilot_net:
+    driver: bridge
