@@ -21,13 +21,16 @@ class Settings(BaseSettings):
     # MCP Server Connection
     mcp_server_url: str = Field(default="http://localhost:8001", alias="NEXT_PUBLIC_MCP_URL")
 
+    # Security & Tokens
+    jwt_secret: str = Field(default="governed-copilot-default-secret-key-32b", alias="JWT_SECRET")
+    confirmation_token_expiry_seconds: int = Field(default=300, alias="CONFIRMATION_TOKEN_EXPIRY_SECONDS")
+
     # Service Binding
     host: str = Field(default="0.0.0.0", alias="AGENT_SERVICE_HOST")
     port: int = Field(default=8000, alias="AGENT_SERVICE_PORT")
 
     # Safety & Limits
     max_rows_default: int = Field(default=100, alias="DEFAULT_MAX_ROWS_PER_QUERY")
-    confirmation_token_expiry_seconds: int = Field(default=300, alias="CONFIRMATION_TOKEN_EXPIRY_SECONDS")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

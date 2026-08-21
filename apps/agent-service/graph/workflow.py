@@ -1,6 +1,7 @@
 """
 LangGraph Multi-Agent Workflow for Governed AI Database Copilot.
 Orchestrates Planner, Clarifier, Retriever, SQL Generator, Safety Critic, Executor, and Explainer nodes.
+Halts on Ambiguity and Unconfirmed Destructive Writes.
 """
 
 import logging
@@ -25,8 +26,17 @@ def route_planner(state: AgentState) -> Literal["clarifier", "retriever"]:
     if intent == "ambiguous":
         logger.info("Routing to Clarifier Agent (Ambiguity Detected)")
         return "clarifier"
-    logger.info("Routing to Retriever Agent (Read Path)")
+    logger.info(f"Routing to Retriever Agent (Intent: {intent})")
     return "retriever"
+
+
+def route_safety_critic(state: AgentState) -> Literal["executor", "end_for_confirmation"]:
+    """Halt graph if write operation requires user confirmation."""
+    requires_conf = state.get("requires_confirmation", False)
+    if requires_conf:
+        logger.info("Halting graph execution: Destructive write requires human authorization.")
+        return "end_for_confirmation"
+    return "executor"
 
 
 def route_executor(state: AgentState) -> Literal["sql_generator", "explainer"]:
@@ -66,11 +76,20 @@ def build_agent_graph():
         },
     )
 
-    # Linear Pipeline
+    # Pipeline
     workflow.add_edge("clarifier", END)
     workflow.add_edge("retriever", "sql_generator")
     workflow.add_edge("sql_generator", "safety_critic")
-    workflow.add_edge("safety_critic", "executor")
+
+    # Conditional Branching from Safety Critic (Halt on Write Confirmation)
+    workflow.add_conditional_edges(
+        "safety_critic",
+        route_safety_critic,
+        {
+            "end_for_confirmation": END,
+            "executor": "executor",
+        },
+    )
 
     # Conditional Branching from Executor (Self-Correction Loop)
     workflow.add_conditional_edges(

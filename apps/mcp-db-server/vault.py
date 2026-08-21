@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, text
 class DatabaseCredentials(BaseModel):
     connection_id: str
     display_name: str
-    db_type: str = "postgresql"  # postgresql, mysql, sqlite
+    db_type: str = "postgresql"
     host: str
     port: int = 5432
     database: str
@@ -43,6 +43,9 @@ class ConnectionSummary(BaseModel):
     updated_at: Optional[str] = None
 
 
+ConnectionRecord = ConnectionSummary
+
+
 class CredentialVault:
     """
     Encrypts database credentials at rest in a local SQLite vault database.
@@ -53,8 +56,6 @@ class CredentialVault:
         if not key:
             key = os.getenv("VAULT_ENCRYPTION_KEY")
         if not key or key == "generate_fernet_key_and_paste_here":
-            # Generate deterministic fallback key if not set, or random in-memory
-            # For local consistency, default to a standard 32-byte urlsafe key if not provided
             key = Fernet.generate_key().decode()
             os.environ["VAULT_ENCRYPTION_KEY"] = key
         
@@ -107,7 +108,6 @@ class CredentialVault:
             creds.created_at = now
         creds.updated_at = now
 
-        # Encrypt the full JSON payload
         raw_json = creds.model_dump_json()
         encrypted = self._cipher.encrypt(raw_json.encode())
 
@@ -150,6 +150,12 @@ class CredentialVault:
             conn.commit()
         return creds.connection_id
 
+    def save_connection(self, data: Dict[str, Any]) -> ConnectionSummary:
+        """Save connection from dict and return summary."""
+        creds = DatabaseCredentials(**data)
+        self.store_credentials(creds)
+        return ConnectionSummary(**creds.model_dump())
+
     def get_credentials(self, connection_id: str) -> Optional[DatabaseCredentials]:
         """Retrieve and decrypt credentials for a given connection_id."""
         with self._get_connection() as conn:
@@ -168,6 +174,20 @@ class CredentialVault:
                 return DatabaseCredentials.model_validate_json(decrypted)
             except Exception as e:
                 raise ValueError(f"Failed to decrypt credentials for connection {connection_id}: {e}")
+
+    def get_connection(self, connection_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve credentials as a dict."""
+        creds = self.get_credentials(connection_id)
+        if not creds:
+            return None
+        return creds.model_dump()
+
+    def get_connection_record(self, connection_id: str) -> Optional[ConnectionSummary]:
+        """Retrieve connection summary record."""
+        creds = self.get_credentials(connection_id)
+        if not creds:
+            return None
+        return ConnectionSummary(**creds.model_dump())
 
     def list_connections(self) -> List[ConnectionSummary]:
         """List all stored connections without exposing plaintext passwords."""
@@ -209,7 +229,6 @@ class CredentialVault:
     def build_connection_url(self, creds: DatabaseCredentials) -> str:
         """Build SQLAlchemy connection string from DatabaseCredentials."""
         if creds.db_type == "postgresql":
-            # Strip query parameters if password or username has special characters
             user = creds.username
             password = creds.password
             return f"postgresql+psycopg2://{user}:{password}@{creds.host}:{creds.port}/{creds.database}?sslmode={creds.ssl_mode}"
@@ -221,14 +240,12 @@ class CredentialVault:
             raise ValueError(f"Unsupported database type: {creds.db_type}")
 
     def get_connection_url(self, connection_id: str) -> Optional[str]:
-        """Build SQLAlchemy connection string for the stored connection_id."""
         creds = self.get_credentials(connection_id)
         if not creds:
             return None
         return self.build_connection_url(creds)
 
     def test_connection(self, creds: DatabaseCredentials) -> Dict[str, Any]:
-        """Test database connection without persisting credentials."""
         url = self.build_connection_url(creds)
         try:
             engine = create_engine(url, connect_args={"connect_timeout": 5} if creds.db_type == "postgresql" else {})
@@ -242,5 +259,6 @@ class CredentialVault:
             return {"success": False, "message": f"Connection failed: {str(e)}"}
 
 
-# Global vault singleton instance
+# Global vault singleton instances
 vault_instance = CredentialVault()
+credential_vault = vault_instance

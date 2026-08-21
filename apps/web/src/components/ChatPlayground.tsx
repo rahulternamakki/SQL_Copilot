@@ -19,8 +19,12 @@ import {
   ChevronUp,
   Table,
   Zap,
+  RotateCcw,
+  Undo2,
+  Check,
 } from "lucide-react";
-import { api, ChatResponse } from "@/lib/api";
+import { api, ChatResponse, WriteConfirmResult } from "@/lib/api";
+import ConfirmationCard from "./ConfirmationCard";
 
 interface ChatPlaygroundProps {
   connectionId: string;
@@ -34,12 +38,19 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
   const [copiedSQL, setCopiedSQL] = useState(false);
   const [showTraceDetails, setShowTraceDetails] = useState(true);
 
+  // Write Confirmation & Rollback State (Phase 3)
+  const [writeResult, setWriteResult] = useState<WriteConfirmResult | null>(null);
+  const [isRollingBack, setIsRollingBack] = useState(false);
+  const [rollbackSuccess, setRollbackSuccess] = useState(false);
+
   const handleSendQuery = async (customQuery?: string) => {
     const q = customQuery || query;
     if (!q.trim() || !connectionId) return;
 
     setLoading(true);
     setResponse(null);
+    setWriteResult(null);
+    setRollbackSuccess(false);
 
     try {
       const res = await api.sendChatMessage(connectionId, q);
@@ -65,6 +76,39 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
     }
   };
 
+  const handleConfirmWrite = async (token: string) => {
+    if (!response || !response.generated_sql) return;
+    try {
+      const res = await api.confirmWriteOperation(
+        connectionId,
+        response.generated_sql,
+        token,
+        response.session_id
+      );
+      setWriteResult(res);
+      setResponse({
+        ...response,
+        requires_confirmation: false,
+        final_summary: `✅ Successfully executed transaction. ${res.rows_affected} row(s) mutated. Rollback snapshot active.`,
+      });
+    } catch (err: any) {
+      alert(`Write failed: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
+  const handleExecuteRollback = async () => {
+    if (!writeResult) return;
+    setIsRollingBack(true);
+    try {
+      await api.rollbackOperation(connectionId, writeResult.rollback_id);
+      setRollbackSuccess(true);
+    } catch (err: any) {
+      alert(`Rollback failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setIsRollingBack(false);
+    }
+  };
+
   const copySQL = (sql: string) => {
     navigator.clipboard.writeText(sql);
     setCopiedSQL(true);
@@ -82,8 +126,14 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
     }
     if (response?.intent === "ambiguous") return "idle";
 
-    if (stepName === "retriever" || stepName === "sql_generator" || stepName === "safety_critic" || stepName === "executor") {
+    if (stepName === "retriever" || stepName === "sql_generator") {
       return response?.generated_sql ? "completed" : "idle";
+    }
+    if (stepName === "safety_critic") {
+      return response?.requires_confirmation ? "halted" : "completed";
+    }
+    if (stepName === "executor") {
+      return response?.execution_result || writeResult ? "completed" : "idle";
     }
     if (stepName === "explainer") return response?.final_summary ? "completed" : "idle";
     return "completed";
@@ -130,7 +180,7 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
                   : "bg-slate-800 text-slate-400"
               }`}
             >
-              Retriever (RAG)
+              Retriever
             </span>
             <ArrowRight className="h-3 w-3 text-slate-600" />
 
@@ -142,14 +192,16 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
                   : "bg-slate-800 text-slate-400"
               }`}
             >
-              SQL Generator
+              SQL Gen
             </span>
             <ArrowRight className="h-3 w-3 text-slate-600" />
 
             {/* Safety Critic */}
             <span
               className={`px-2.5 py-0.5 rounded-md font-mono transition ${
-                getStepStatus("safety_critic") === "completed"
+                getStepStatus("safety_critic") === "halted"
+                  ? "bg-rose-500/20 text-rose-300 border border-rose-500/50 animate-pulse font-bold"
+                  : getStepStatus("safety_critic") === "completed"
                   ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
                   : "bg-slate-800 text-slate-400"
               }`}
@@ -166,14 +218,20 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
                   : "bg-slate-800 text-slate-400"
               }`}
             >
-              Executor (MCP)
+              Executor
             </span>
           </div>
         </div>
 
         {response && (
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+            <span
+              className={`text-[11px] font-mono px-2 py-0.5 rounded border ${
+                response.risk_level === "high"
+                  ? "text-rose-400 bg-rose-500/10 border-rose-500/30 font-bold"
+                  : "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+              }`}
+            >
               Risk: {response.risk_level?.toUpperCase() || "NONE"}
             </span>
             {response.retry_count > 0 && (
@@ -197,7 +255,7 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
           </div>
         </div>
 
-        {/* Loading Spinner State */}
+        {/* Loading State */}
         {loading && (
           <div className="flex gap-3 max-w-3xl animate-in fade-in">
             <div className="h-8 w-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-xs font-semibold text-emerald-400 shrink-0">
@@ -208,15 +266,15 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
               <div className="flex items-center gap-2 text-[11px] text-slate-500">
                 <span>Classifying intent</span>
                 <span>•</span>
-                <span>Searching Qdrant schema vectors</span>
+                <span>Safety inspection & dry run</span>
                 <span>•</span>
-                <span>Synthesizing SQL via Groq LLaMA 3.3</span>
+                <span>Synthesizing SQL</span>
               </div>
             </div>
           </div>
         )}
 
-        {/* Ambiguity Interception Card (Step 2.4) */}
+        {/* Ambiguity Interception Card (Phase 2 Step 2.4) */}
         {response && response.intent === "ambiguous" && (
           <div className="flex gap-3 max-w-3xl animate-in fade-in">
             <div className="h-8 w-8 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-xs font-semibold text-amber-400 shrink-0">
@@ -237,7 +295,6 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
                 {response.clarification_question || "The query contains ambiguous business criteria. Please clarify your intent:"}
               </p>
 
-              {/* Clarification Options */}
               <div className="space-y-2">
                 <button
                   onClick={() => handleClarificationSelect("Highest Total Sales Revenue Processed")}
@@ -262,18 +319,6 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
                   </div>
                   <ArrowRight className="h-4 w-4 text-slate-500 group-hover:text-emerald-400 transition" />
                 </button>
-
-                <button
-                  onClick={() => handleClarificationSelect("Customer Support Resolution Speed")}
-                  disabled={clarifying}
-                  className="w-full text-left p-3 rounded-xl bg-slate-900/80 hover:bg-emerald-950/40 border border-slate-700/80 hover:border-emerald-500/40 text-xs text-slate-200 transition flex items-center justify-between group"
-                >
-                  <div>
-                    <span className="font-semibold text-emerald-300 block">Option 3: Support & Refund Processing</span>
-                    <span className="text-[11px] text-slate-400">Based on refund processing and customer satisfaction metrics</span>
-                  </div>
-                  <ArrowRight className="h-4 w-4 text-slate-500 group-hover:text-emerald-400 transition" />
-                </button>
               </div>
 
               {clarifying && (
@@ -286,14 +331,71 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
           </div>
         )}
 
-        {/* AI Answer & Execution Flow */}
-        {response && response.generated_sql && (
+        {/* Phase 3 Destructive Action Confirmation Card */}
+        {response && response.requires_confirmation && response.confirmation_token && (
+          <div className="flex gap-3 max-w-4xl animate-in fade-in">
+            <div className="h-8 w-8 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-xs font-semibold text-rose-400 shrink-0">
+              <ShieldCheck className="h-4 w-4" />
+            </div>
+            <div className="flex-1">
+              <ConfirmationCard
+                sql={response.generated_sql || ""}
+                previewText={response.plain_language_preview || "Modifying operation requires authorization."}
+                token={response.confirmation_token}
+                sampleRows={response.sample_rows}
+                columns={response.columns}
+                onConfirm={handleConfirmWrite}
+                onCancel={() => setResponse(null)}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Phase 3 1-Click Rollback Banner */}
+        {writeResult && (
+          <div className="flex gap-3 max-w-4xl animate-in fade-in">
+            <div className="h-8 w-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-xs font-semibold text-emerald-400 shrink-0">
+              <Check className="h-4 w-4" />
+            </div>
+            <div className="flex-1 p-5 rounded-2xl bg-gradient-to-r from-emerald-950/40 to-slate-900 border border-emerald-500/30 shadow-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold text-emerald-300 flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Transaction Executed Successfully ({writeResult.rows_affected} rows affected)
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    Rollback ID: <strong className="font-mono text-emerald-400">{writeResult.rollback_id}</strong>
+                  </p>
+                </div>
+
+                {!rollbackSuccess ? (
+                  <button
+                    onClick={handleExecuteRollback}
+                    disabled={isRollingBack}
+                    className="px-4 py-2 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 text-xs font-semibold flex items-center gap-1.5 transition"
+                  >
+                    {isRollingBack ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}
+                    <span>↩️ Rollback Changes (Within 5 mins)</span>
+                  </button>
+                ) : (
+                  <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold flex items-center gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> State Rolled Back!
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Read Query Answer & Results (When NOT waiting for confirmation) */}
+        {response && response.generated_sql && !response.requires_confirmation && !writeResult && (
           <div className="flex gap-3 max-w-4xl animate-in fade-in">
             <div className="h-8 w-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-xs font-semibold text-emerald-400 shrink-0">
               AI
             </div>
             <div className="flex-1 space-y-4">
-              {/* Agent Reasoning Trace Drawer */}
+              {/* Agent Trace */}
               <div className="p-4 rounded-2xl bg-[#0c1220] border border-slate-800 space-y-3 text-xs shadow-md">
                 <div className="flex items-center justify-between">
                   <button
@@ -355,7 +457,7 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
                 </pre>
               </div>
 
-              {/* Natural Language Executive Explanation */}
+              {/* Executive Summary */}
               {response.final_summary && (
                 <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/5 to-cyan-500/5 border border-emerald-500/20 text-sm text-slate-200 leading-relaxed shadow-md space-y-1">
                   <div className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">
@@ -413,7 +515,7 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
         )}
       </div>
 
-      {/* Preset Quick Prompt Bar */}
+      {/* Preset Quick Prompt Bar with Write Tests */}
       <div className="px-6 py-2 border-t border-slate-800/80 bg-slate-900/40 flex items-center gap-2 overflow-x-auto text-xs shrink-0">
         <span className="text-slate-500 font-medium whitespace-nowrap flex items-center gap-1">
           <Zap className="h-3 w-3 text-amber-400" /> Presets:
@@ -425,22 +527,22 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
           🔍 Inactive 90 Days
         </button>
         <button
-          onClick={() => handleSendQuery("Calculate the average discount percent applied across all audio accessories.")}
-          className="px-3 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 whitespace-nowrap transition"
-        >
-          🔍 Average Discount %
-        </button>
-        <button
-          onClick={() => handleSendQuery("List all completed orders from the USA with their total amount.")}
-          className="px-3 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 whitespace-nowrap transition"
-        >
-          🔍 USA Completed Orders
-        </button>
-        <button
           onClick={() => handleSendQuery("Who is our best employee?")}
           className="px-3 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap transition"
         >
           ⚠️ Test Ambiguity (Best Employee)
+        </button>
+        <button
+          onClick={() => handleSendQuery("Delete all inactive customer accounts who registered before 2022.")}
+          className="px-3 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 whitespace-nowrap transition font-semibold"
+        >
+          🔥 Test Destructive Delete & Rollback
+        </button>
+        <button
+          onClick={() => handleSendQuery("Update unit price for all products in category 'Furniture' to add a 15% inflation increase.")}
+          className="px-3 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 whitespace-nowrap transition font-semibold"
+        >
+          🔥 Test Bulk Update & Rollback
         </button>
       </div>
 
@@ -457,7 +559,7 @@ export default function ChatPlayground({ connectionId }: ChatPlaygroundProps) {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ask any database question (e.g. 'Show total sales by product category')..."
+            placeholder="Ask any database question (e.g. 'Delete inactive accounts' or 'Show sales')..."
             className="flex-1 bg-slate-950 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition font-normal"
           />
           <button

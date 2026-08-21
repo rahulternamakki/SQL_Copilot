@@ -22,8 +22,10 @@ import {
   ChevronDown,
   Server,
   Zap,
+  Flame,
+  Undo2,
 } from "lucide-react";
-import { api, DatabaseConnection } from "@/lib/api";
+import { api, DatabaseConnection, AuditLogEntry } from "@/lib/api";
 import ConnectionModal from "@/components/ConnectionModal";
 import SchemaViewer from "@/components/SchemaViewer";
 import GlossaryEditor from "@/components/GlossaryEditor";
@@ -34,7 +36,8 @@ export default function Home() {
   const [connections, setConnections] = useState<DatabaseConnection[]>([]);
   const [activeConnectionId, setActiveConnectionId] = useState<string>("conn_ecommerce_demo");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [backendHealth, setBackendHealth] = useState<any>(null);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
 
   const loadConnections = async () => {
     try {
@@ -48,19 +51,36 @@ export default function Home() {
     }
   };
 
-  const loadHealth = async () => {
+  const loadAuditLogs = async () => {
+    setLoadingLogs(true);
     try {
-      const data = await api.checkHealth();
-      setBackendHealth(data);
+      const logs = await api.getAuditLogs(activeConnectionId);
+      setAuditLogs(logs);
     } catch (err) {
-      setBackendHealth(null);
+      console.warn("Could not load audit logs:", err);
+    } finally {
+      setLoadingLogs(false);
     }
   };
 
   useEffect(() => {
     loadConnections();
-    loadHealth();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === "audit") {
+      loadAuditLogs();
+    }
+  }, [activeTab, activeConnectionId]);
+
+  const handleRollbackAudit = async (rollbackId: string) => {
+    try {
+      await api.rollbackOperation(activeConnectionId, rollbackId);
+      loadAuditLogs();
+    } catch (err: any) {
+      alert(`Rollback failed: ${err.response?.data?.detail || err.message}`);
+    }
+  };
 
   const activeConn = connections.find((c) => c.connection_id === activeConnectionId) || {
     connection_id: "conn_ecommerce_demo",
@@ -71,7 +91,7 @@ export default function Home() {
     database: "ecommerce_demo",
     username: "postgres",
     ssl_mode: "disable",
-    read_only: true,
+    read_only: false,
   };
 
   return (
@@ -86,7 +106,7 @@ export default function Home() {
             <h1 className="text-base font-semibold tracking-tight text-white flex items-center gap-2">
               Governed AI Database Copilot
               <span className="text-xs font-mono font-normal bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                Phase 2 Core Agent Flow
+                Phase 3 Safety Layer & Rollback
               </span>
             </h1>
             <p className="text-xs text-slate-400">RAG-Grounded • Multi-Agent Orchestration • MCP Isolation</p>
@@ -138,7 +158,7 @@ export default function Home() {
           {/* Backend Status Indicator */}
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/60 border border-slate-700/60 text-xs">
             <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="text-slate-300">LangGraph Agent: Online (8000)</span>
+            <span className="text-slate-300">LangGraph + MCP Active</span>
           </div>
         </div>
       </header>
@@ -194,36 +214,36 @@ export default function Home() {
                 }`}
               >
                 <History className="h-4 w-4" />
-                <span>Audit Trail</span>
+                <span>Audit & Rollback Logs</span>
               </button>
             </nav>
           </div>
 
-          {/* Quick Benchmark Guide */}
+          {/* Governance Rules Sidebar Box */}
           <div className="flex-1 overflow-y-auto p-3.5 space-y-3 custom-scrollbar">
             <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1 flex items-center gap-1">
-              <Zap className="h-3 w-3 text-amber-400" />
-              <span>Phase 2 Benchmarks</span>
+              <ShieldCheck className="h-3 w-3 text-emerald-400" />
+              <span>Governance Safety Rules</span>
             </div>
             <div className="space-y-2 text-xs">
               <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1">
-                <span className="font-semibold text-emerald-300 block">1. Read-Only Retrieval</span>
+                <span className="font-semibold text-rose-400 block">1. Teller vs. Approver</span>
                 <p className="text-[11px] text-slate-400">
-                  RAG grounds query context using Qdrant vector search.
+                  Writes cannot execute without an HMAC-signed token approved by a human.
                 </p>
               </div>
 
               <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1">
-                <span className="font-semibold text-amber-300 block">2. Ambiguity Interception</span>
+                <span className="font-semibold text-amber-300 block">2. 5-Min Rollback Window</span>
                 <p className="text-[11px] text-slate-400">
-                  Clarifier agent halts execution on ill-defined terms like &quot;best employee&quot;.
+                  Full before-state snapshots allow instant 1-click state reversion.
                 </p>
               </div>
 
               <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1">
-                <span className="font-semibold text-cyan-300 block">3. Self-Correction Retry</span>
+                <span className="font-semibold text-emerald-300 block">3. MCP Process Isolation</span>
                 <p className="text-[11px] text-slate-400">
-                  Single-retry feedback loop on database errors.
+                  Credentials stored in encrypted vault • Zero direct DB access in UI.
                 </p>
               </div>
             </div>
@@ -239,41 +259,103 @@ export default function Home() {
           {activeTab === "glossary" && <GlossaryEditor connectionId={activeConnectionId} />}
 
           {activeTab === "audit" && (
-            <div className="p-6 space-y-4">
-              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                <History className="h-4 w-4 text-emerald-400" />
-                Audit Trail & Rollback History
-              </h3>
-              <p className="text-xs text-slate-400">
-                Every prompt, generated SQL, Safety Critic risk score, and confirmation decision is securely logged.
-              </p>
-              <div className="rounded-xl border border-slate-800 overflow-hidden bg-slate-900/50">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-950 border-b border-slate-800 text-slate-400">
-                    <tr>
-                      <th className="p-3">Timestamp</th>
-                      <th className="p-3">Operation / Risk</th>
-                      <th className="p-3">User Prompt</th>
-                      <th className="p-3">SQL Executed</th>
-                      <th className="p-3">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800 text-slate-300 font-mono">
-                    <tr>
-                      <td className="p-3 text-slate-500 text-[11px]">Just now</td>
-                      <td className="p-3">
-                        <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px]">
-                          SELECT (none)
-                        </span>
-                      </td>
-                      <td className="p-3 font-sans">Which customers haven&apos;t placed an order in 90 days?</td>
-                      <td className="p-3 text-emerald-400 text-[11px] truncate max-w-xs">
-                        SELECT c.id, c.email FROM customers c ...
-                      </td>
-                      <td className="p-3 text-emerald-400 font-sans">Success (4 rows)</td>
-                    </tr>
-                  </tbody>
-                </table>
+            <div className="flex-1 flex flex-col p-6 space-y-4 overflow-hidden">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <History className="h-4 w-4 text-emerald-400" />
+                    Transaction Audit Trail & 1-Click Rollback Console
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Step 3.3: Every mutating operation captures a pre-state snapshot and computed inverse SQL in local rollback storage.
+                  </p>
+                </div>
+                <button
+                  onClick={loadAuditLogs}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 border border-slate-700 transition"
+                >
+                  <RotateCcw className={`h-3.5 w-3.5 ${loadingLogs ? "animate-spin" : ""}`} />
+                  <span>Refresh Logs</span>
+                </button>
+              </div>
+
+              <div className="flex-1 rounded-2xl border border-slate-800 overflow-hidden bg-[#0c1220] shadow-xl flex flex-col">
+                <div className="overflow-x-auto flex-1 custom-scrollbar">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 font-medium font-mono">
+                        <th className="p-3.5">Timestamp</th>
+                        <th className="p-3.5">Rollback ID</th>
+                        <th className="p-3.5">Operation</th>
+                        <th className="p-3.5">Table</th>
+                        <th className="p-3.5">Rows Affected</th>
+                        <th className="p-3.5">SQL Statement</th>
+                        <th className="p-3.5">Status</th>
+                        <th className="p-3.5 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-slate-300 font-mono">
+                      {auditLogs.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="p-8 text-center text-slate-500 font-sans">
+                            No write mutations recorded in this connection yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        auditLogs.map((log) => (
+                          <tr key={log.rollback_id} className="hover:bg-slate-900/40 transition">
+                            <td className="p-3.5 text-slate-500 text-[11px] whitespace-nowrap">
+                              {log.created_at || "Recent"}
+                            </td>
+                            <td className="p-3.5 text-emerald-400 text-[11px] font-bold">
+                              {log.rollback_id}
+                            </td>
+                            <td className="p-3.5">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  log.operation_type === "DELETE"
+                                    ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                                    : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                                }`}
+                              >
+                                {log.operation_type}
+                              </span>
+                            </td>
+                            <td className="p-3.5 text-slate-200">{log.table_name}</td>
+                            <td className="p-3.5 text-slate-200">{log.rows_affected}</td>
+                            <td className="p-3.5 text-slate-400 text-[11px] truncate max-w-xs font-mono">
+                              {log.original_sql}
+                            </td>
+                            <td className="p-3.5">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] ${
+                                  log.status === "active"
+                                    ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 font-semibold"
+                                    : "bg-slate-800 text-slate-400 font-sans"
+                                }`}
+                              >
+                                {log.status.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="p-3.5 text-right">
+                              {log.status === "active" ? (
+                                <button
+                                  onClick={() => handleRollbackAudit(log.rollback_id)}
+                                  className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-sans font-medium flex items-center gap-1 ml-auto transition"
+                                >
+                                  <Undo2 className="h-3 w-3" />
+                                  <span>Rollback</span>
+                                </button>
+                              ) : (
+                                <span className="text-[11px] text-slate-500 font-sans">Rolled Back</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

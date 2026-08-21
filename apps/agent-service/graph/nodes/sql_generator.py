@@ -35,14 +35,14 @@ class SQLGeneratorAgent:
 
                 system_prompt = (
                     "You are an expert PostgreSQL SQL Architect in an enterprise database copilot. "
-                    "Generate a single, syntactically perfect, read-only SQL SELECT query that answers the user question. "
+                    "Generate a single, syntactically perfect SQL query that answers the user question. "
                     "STRICT RULES:\n"
                     "1. Only use table and column names present in the provided schema context. NEVER hallucinate table or column names.\n"
                     "2. Follow any SQL Filter / Business Rules mentioned in the glossary chunks.\n"
-                    "3. Always qualify column names with table aliases when using JOINs.\n"
+                    "3. For write requests (UPDATE/DELETE/INSERT), only touch the necessary rows and always include WHERE clauses.\n"
                     "4. If error context from a previous attempt is provided, analyze the error and fix it completely.\n"
                     "5. Output must be a strict JSON object matching schema:\n"
-                    "{\"sql\": \"SELECT ...;\", \"tables_touched\": [\"table1\", \"table2\"], \"operation_type\": \"SELECT\", \"reasoning\": \"...\"}"
+                    "{\"sql\": \"...;\", \"tables_touched\": [\"table1\"], \"operation_type\": \"SELECT\"|\"UPDATE\"|\"DELETE\"|\"INSERT\", \"reasoning\": \"...\"}"
                 )
 
                 prompt_content = f"User Question: {user_query}\n\nGrounded Schema & Glossary Context:\n{context_str}"
@@ -73,7 +73,21 @@ class SQLGeneratorAgent:
         # Deterministic / Benchmark Synthesis Fallback
         q_lower = user_query.lower()
         
-        if "inactive" in q_lower or "90 days" in q_lower or "haven't placed" in q_lower:
+        if "delete" in q_lower:
+            return SQLGeneratorOutput(
+                sql="DELETE FROM customers WHERE created_at < '2022-01-01' AND status = 'inactive';",
+                tables_touched=["customers"],
+                operation_type="DELETE",
+                reasoning="Deletes inactive customer accounts registered prior to 2022.",
+            )
+        elif "update" in q_lower or "inflation" in q_lower:
+            return SQLGeneratorOutput(
+                sql="UPDATE products SET unit_price = unit_price * 1.15 WHERE category = 'Furniture';",
+                tables_touched=["products"],
+                operation_type="UPDATE",
+                reasoning="Updates product unit prices with 15% inflation adjustment for Furniture category.",
+            )
+        elif "inactive" in q_lower or "90 days" in q_lower or "haven't placed" in q_lower:
             return SQLGeneratorOutput(
                 sql=(
                     "SELECT c.id, c.first_name, c.last_name, c.email, MAX(o.order_date) AS last_order_date "
@@ -151,5 +165,5 @@ def sql_generator_node(state: AgentState) -> Dict[str, Any]:
         "generated_sql": output.sql,
         "operation_type": output.operation_type,
         "tables_touched": output.tables_touched,
-        "error_message": None,  # Reset error for new attempt
+        "error_message": None,
     }

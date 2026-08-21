@@ -1,6 +1,7 @@
 """
 Agent Service FastAPI Application for Governed AI Database Copilot.
 Orchestrates database connections, schema introspection, auto-glossary drafting, and multi-agent pipelines.
+Includes Phase 3 Safety Governance, Confirmation Tokens, and Rollback Routing.
 """
 
 import os
@@ -20,14 +21,15 @@ from rag.qdrant_store import qdrant_store
 from services.connection_service import connection_service, DatabaseConnectionPayload
 from services.introspection_service import introspection_service
 from services.glossary_service import glossary_service, GlossaryTerm, GlossaryTermCreate
+from services.token_service import token_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("agent-service")
 
 app = FastAPI(
     title="Governed AI Database Copilot - Agent Service",
-    version="0.2.0",
-    description="Multi-agent orchestrator with RAG grounding, safety critic, and MCP isolation.",
+    version="0.3.0",
+    description="Multi-agent orchestrator with RAG grounding, safety critic, HMAC tokens, and MCP rollback.",
 )
 
 app.add_middleware(
@@ -48,7 +50,7 @@ class HealthResponse(BaseModel):
     groq_configured: bool
     qdrant_target: str
     mcp_target: str
-    version: str = "0.2.0"
+    version: str = "0.3.0"
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -80,7 +82,6 @@ async def save_database_connection(payload: DatabaseConnectionPayload):
     """Save encrypted database credentials in vault and trigger RAG ingestion."""
     try:
         res = await connection_service.save_connection(payload)
-        # Background RAG ingestion
         try:
             schema_data = await introspection_service.get_schema(payload.connection_id, force_refresh=True)
             glossary_terms = glossary_service.list_terms(payload.connection_id)
@@ -128,7 +129,7 @@ async def delete_database_connection(connection_id: str):
 
 @app.get("/api/connections/{connection_id}/schema")
 async def get_connection_schema(connection_id: str):
-    """Retrieve structured database schema JSON (cached or live)."""
+    """Retrieve structured database schema JSON."""
     try:
         return await introspection_service.get_schema(connection_id, force_refresh=False)
     except Exception as e:
@@ -175,7 +176,7 @@ async def get_table_sample(connection_id: str, table_name: str, limit: int = Que
 
 @app.post("/api/connections/{connection_id}/rag/ingest")
 async def ingest_connection_rag(connection_id: str):
-    """Manually trigger RAG chunking and Qdrant vector indexing."""
+    """Trigger RAG chunking and Qdrant vector indexing."""
     try:
         schema_data = await introspection_service.get_schema(connection_id, force_refresh=False)
         glossary_terms = glossary_service.list_terms(connection_id)
@@ -211,7 +212,6 @@ async def generate_glossary_draft(connection_id: str):
     try:
         schema_data = await introspection_service.get_schema(connection_id, force_refresh=False)
         terms = await glossary_service.auto_draft_with_llm(connection_id, schema_data)
-        # Update RAG store
         s_chunks = chunker.chunk_schema(connection_id, schema_data)
         g_chunks = chunker.chunk_glossary(connection_id, [t.model_dump() for t in terms])
         qdrant_store.upsert_chunks(connection_id, s_chunks + g_chunks)
@@ -245,7 +245,7 @@ def delete_glossary_term(connection_id: str, term_id: str):
 
 
 # ==============================================================================
-# CHAT & MULTI-AGENT EXECUTION ENDPOINTS
+# CHAT, CONFIRMATION, & ROLLBACK ENDPOINTS (PHASE 2 & PHASE 3)
 # ==============================================================================
 
 class ChatRequest(BaseModel):
@@ -259,6 +259,18 @@ class ClarifyRequest(BaseModel):
     original_query: str
     selected_option: str
     session_id: Optional[str] = None
+
+
+class ConfirmWriteRequest(BaseModel):
+    connection_id: str
+    sql: str
+    confirmation_token: str
+    session_id: Optional[str] = None
+
+
+class RollbackRequest(BaseModel):
+    connection_id: str
+    rollback_id: str
 
 
 @app.post("/api/chat")
@@ -282,7 +294,6 @@ async def execute_chat(req: ChatRequest):
     except Exception as e:
         logger.warning(f"RAG pre-check warning: {e}")
 
-    # Build initial AgentState
     initial_state: AgentState = {
         "connection_id": req.connection_id,
         "user_query": req.query,
@@ -306,9 +317,26 @@ async def execute_chat(req: ChatRequest):
         "final_summary": None,
     }
 
-    # Execute LangGraph
     try:
         final_state = agent_app.invoke(initial_state)
+        
+        # If destructive write requires confirmation, extract sample rows from dry run
+        sample_rows = []
+        columns = []
+        if final_state.get("requires_confirmation"):
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                try:
+                    res = await client.post(
+                        f"{settings.mcp_server_url}/tools/dry_run_preview",
+                        json={"connection_id": req.connection_id, "sql": final_state.get("generated_sql")},
+                    )
+                    if res.status_code == 200:
+                        data = res.json()
+                        sample_rows = data.get("sample_rows", [])
+                        columns = data.get("columns", [])
+                except Exception:
+                    pass
+
         return {
             "session_id": session_id,
             "connection_id": req.connection_id,
@@ -322,6 +350,10 @@ async def execute_chat(req: ChatRequest):
             "tables_touched": final_state.get("tables_touched", []),
             "risk_level": final_state.get("risk_level"),
             "requires_confirmation": final_state.get("requires_confirmation", False),
+            "plain_language_preview": final_state.get("plain_language_preview"),
+            "confirmation_token": final_state.get("confirmation_token"),
+            "sample_rows": sample_rows,
+            "columns": columns,
             "execution_result": final_state.get("execution_result"),
             "final_summary": final_state.get("final_summary"),
             "retry_count": final_state.get("retry_count", 0),
@@ -333,9 +365,7 @@ async def execute_chat(req: ChatRequest):
 
 @app.post("/api/chat/clarify")
 async def clarify_and_resume_chat(req: ClarifyRequest):
-    """
-    Resume agent workflow following user clarification response.
-    """
+    """Resume agent workflow following user clarification response."""
     session_id = req.session_id or str(uuid.uuid4())
     logger.info(f"Resuming query '{req.original_query}' with user clarification '{req.selected_option}'")
 
@@ -347,7 +377,7 @@ async def clarify_and_resume_chat(req: ClarifyRequest):
             {"role": "assistant", "content": "Please clarify your criteria."},
             {"role": "user", "content": f"Clarification: {req.selected_option}"},
         ],
-        "intent": "read",  # Resolved to read intent
+        "intent": "read",
         "plan_steps": [],
         "clarification_question": None,
         "user_clarification_response": req.selected_option,
@@ -386,6 +416,89 @@ async def clarify_and_resume_chat(req: ClarifyRequest):
     except Exception as e:
         logger.error(f"Clarified execution failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/chat/confirm")
+async def confirm_write_execution(req: ConfirmWriteRequest):
+    """
+    Validate HMAC confirmation token and dispatch mutation to MCP server with rollback snapshot.
+    """
+    # 1. Verify HMAC Token & 5-minute TTL
+    valid, err_msg = token_service.verify_token(req.confirmation_token, req.connection_id, req.sql)
+    if not valid:
+        raise HTTPException(status_code=400, detail=err_msg or "Invalid confirmation token.")
+
+    # 2. Dispatch to MCP DB Server
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            res = await client.post(
+                f"{settings.mcp_server_url}/tools/run_write",
+                json={
+                    "connection_id": req.connection_id,
+                    "sql": req.sql,
+                    "confirmation_token": req.confirmation_token,
+                },
+            )
+            if res.status_code != 200:
+                detail = res.json().get("detail", "Mutation execution failed on database.")
+                raise HTTPException(status_code=400, detail=detail)
+
+            result = res.json()
+            return {
+                "success": True,
+                "connection_id": req.connection_id,
+                "sql": req.sql,
+                "rows_affected": result.get("rows_affected", 0),
+                "rollback_id": result.get("rollback_id"),
+                "message": result.get("message", "Mutation executed successfully."),
+            }
+        except HTTPException as he:
+            raise he
+        except Exception as e:
+            logger.error(f"Error dispatching write to MCP server: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/chat/rollback")
+async def execute_rollback(req: RollbackRequest):
+    """
+    Trigger 1-click rollback restoring snapshotted database rows.
+    """
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            res = await client.post(
+                f"{settings.mcp_server_url}/tools/rollback",
+                json={"rollback_id": req.rollback_id},
+            )
+            if res.status_code != 200:
+                detail = res.json().get("detail", "Rollback execution failed.")
+                raise HTTPException(status_code=400, detail=detail)
+
+            return res.json()
+        except HTTPException as he:
+            raise he
+        except Exception as e:
+            logger.error(f"Rollback error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/audit/logs")
+async def get_audit_logs(connection_id: Optional[str] = None):
+    """
+    Retrieve historical transaction audit logs and rollback history.
+    """
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        try:
+            url = f"{settings.mcp_server_url}/tools/audit_logs"
+            if connection_id:
+                url += f"?connection_id={connection_id}"
+            res = await client.get(url)
+            if res.status_code == 200:
+                return res.json()
+            return []
+        except Exception as e:
+            logger.warning(f"Failed to fetch audit logs: {e}")
+            return []
 
 
 if __name__ == "__main__":
