@@ -5,9 +5,10 @@ Orchestrates database connections, schema introspection, auto-glossary drafting,
 
 import os
 import uuid
+import httpx
 import logging
 from typing import Dict, Any, List, Optional
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -106,7 +107,7 @@ async def delete_database_connection(connection_id: str):
 
 
 # ==============================================================================
-# SCHEMA INTROSPECTION ENDPOINTS
+# SCHEMA INTROSPECTION & SAMPLE DATA ENDPOINTS
 # ==============================================================================
 
 @app.get("/api/connections/{connection_id}/schema")
@@ -125,6 +126,26 @@ async def refresh_connection_schema(connection_id: str):
         return await introspection_service.get_schema(connection_id, force_refresh=True)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/connections/{connection_id}/tables/{table_name}/sample")
+async def get_table_sample(connection_id: str, table_name: str, limit: int = Query(default=5, ge=1, le=50)):
+    """Fetch sample rows from a table using AST-verified read-only select."""
+    safe_table = "".join(c for c in table_name if c.isalnum() or c == "_")
+    sql = f"SELECT * FROM {safe_table} LIMIT {limit}"
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            res = await client.post(
+                f"{settings.mcp_server_url}/tools/run_select",
+                json={"connection_id": connection_id, "sql": sql, "max_rows": limit},
+            )
+            if res.status_code != 200:
+                detail = res.json().get("detail", "Failed to fetch table sample data")
+                raise HTTPException(status_code=500, detail=detail)
+            return res.json()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==============================================================================

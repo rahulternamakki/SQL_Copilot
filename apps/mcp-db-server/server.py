@@ -162,7 +162,7 @@ class MCPDatabaseEngine:
                 # Allowed root expressions: Select, Union
                 if not isinstance(statement, (exp.Select, exp.Union)):
                     return False
-                # Reject if any modifying clause exists in AST
+                # Reject if modifying expressions exist in AST
                 if statement.find(exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Alter):
                     return False
             return True
