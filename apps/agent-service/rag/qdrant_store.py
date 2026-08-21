@@ -70,6 +70,19 @@ class QdrantStore:
         contents = [c.content for c in chunks]
         vectors = embedder.embed_batch(contents)
 
+        # Store in local memory store as primary fallback
+        self._fallback_memory_store[col_name] = [
+            {
+                "chunk_id": chunk.chunk_id,
+                "chunk_type": chunk.chunk_type,
+                "title": chunk.title,
+                "content": chunk.content,
+                "vector": vec,
+                "metadata": chunk.metadata,
+            }
+            for chunk, vec in zip(chunks, vectors)
+        ]
+
         client = self._get_client()
         if client:
             try:
@@ -89,22 +102,8 @@ class QdrantStore:
                 ]
                 client.upsert(collection_name=col_name, points=points)
                 logger.info(f"Successfully upserted {len(points)} chunks into Qdrant collection '{col_name}'")
-                return
             except Exception as e:
-                logger.warning(f"Qdrant upsert failed: {e}. Storing in memory fallback.")
-
-        # Fallback memory store
-        self._fallback_memory_store[col_name] = [
-            {
-                "chunk_id": chunk.chunk_id,
-                "chunk_type": chunk.chunk_type,
-                "title": chunk.title,
-                "content": chunk.content,
-                "vector": vec,
-                "metadata": chunk.metadata,
-            }
-            for chunk, vec in zip(chunks, vectors)
-        ]
+                logger.warning(f"Qdrant upsert failed: {e}. Kept in memory fallback.")
 
     def search(self, connection_id: str, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         self.ensure_collection(connection_id)
@@ -114,23 +113,45 @@ class QdrantStore:
         client = self._get_client()
         if client:
             try:
-                search_results = client.search(
-                    collection_name=col_name,
-                    query_vector=query_vec,
-                    limit=limit,
-                )
-                if search_results:
-                    return [
-                        {
-                            "chunk_id": hit.payload.get("chunk_id"),
-                            "chunk_type": hit.payload.get("chunk_type"),
-                            "title": hit.payload.get("title"),
-                            "content": hit.payload.get("content"),
-                            "score": hit.score,
-                            "metadata": hit.payload.get("metadata", {}),
-                        }
-                        for hit in search_results
-                    ]
+                # 1. Try modern query_points (Qdrant v1.10+)
+                if hasattr(client, "query_points"):
+                    res = client.query_points(
+                        collection_name=col_name,
+                        query=query_vec,
+                        limit=limit,
+                    )
+                    points = getattr(res, "points", res)
+                    if points:
+                        return [
+                            {
+                                "chunk_id": hit.payload.get("chunk_id"),
+                                "chunk_type": hit.payload.get("chunk_type"),
+                                "title": hit.payload.get("title"),
+                                "content": hit.payload.get("content"),
+                                "score": hit.score if hasattr(hit, "score") else 1.0,
+                                "metadata": hit.payload.get("metadata", {}),
+                            }
+                            for hit in points
+                        ]
+                # 2. Try classic search
+                elif hasattr(client, "search"):
+                    search_results = client.search(
+                        collection_name=col_name,
+                        query_vector=query_vec,
+                        limit=limit,
+                    )
+                    if search_results:
+                        return [
+                            {
+                                "chunk_id": hit.payload.get("chunk_id"),
+                                "chunk_type": hit.payload.get("chunk_type"),
+                                "title": hit.payload.get("title"),
+                                "content": hit.payload.get("content"),
+                                "score": hit.score,
+                                "metadata": hit.payload.get("metadata", {}),
+                            }
+                            for hit in search_results
+                        ]
             except Exception as e:
                 logger.warning(f"Qdrant search failed: {e}. Falling back to memory cosine search.")
 

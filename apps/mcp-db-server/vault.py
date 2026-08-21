@@ -12,6 +12,20 @@ from typing import Dict, Any, List, Optional
 from cryptography.fernet import Fernet
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, text
+from dotenv import load_dotenv
+
+# Auto-discover and load .env
+current_dir = os.path.dirname(os.path.abspath(__file__))
+possible_env_paths = [
+    os.path.join(current_dir, ".env"),
+    os.path.join(os.path.dirname(current_dir), ".env"),
+    os.path.join(os.path.dirname(os.path.dirname(current_dir)), ".env"),
+    ".env",
+    "../.env",
+]
+for p in possible_env_paths:
+    if os.path.exists(p):
+        load_dotenv(p, override=False)
 
 
 class DatabaseCredentials(BaseModel):

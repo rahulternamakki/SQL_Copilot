@@ -1,11 +1,26 @@
 """
 Configuration settings for Governed AI Database Copilot Agent Service.
+Automatically discovers .env from root, parent, and current working directories.
 """
 
 import os
 from typing import Optional
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+
+# Auto-discover and load .env from root and parent paths
+current_dir = os.path.dirname(os.path.abspath(__file__))
+possible_env_paths = [
+    os.path.join(current_dir, ".env"),
+    os.path.join(os.path.dirname(current_dir), ".env"),
+    os.path.join(os.path.dirname(os.path.dirname(current_dir)), ".env"),
+    ".env",
+    "../.env",
+]
+for p in possible_env_paths:
+    if os.path.exists(p):
+        load_dotenv(p, override=False)
 
 
 class Settings(BaseSettings):
